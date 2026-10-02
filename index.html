@@ -43,6 +43,16 @@
   }
   button:hover:not(:disabled) { background: var(--leaf); color: var(--bg); }
   button:disabled { opacity: .5; cursor: default; }
+
+  #song { display: grid; gap: .75rem; justify-items: center; }
+  #song[hidden] { display: none; }
+  .filebtn {
+    font-weight: 600; padding: .7rem 2rem; border-radius: 999px;
+    border: 1px solid rgba(232,240,232,.3); color: rgba(232,240,232,.8);
+    cursor: pointer;
+  }
+  .filebtn:hover { border-color: var(--leaf); color: var(--leaf); }
+  .note { font-size: .8rem; color: rgba(232,240,232,.4); }
 </style>
 </head>
 <body>
@@ -52,6 +62,16 @@
     <h1>Saber-Tea</h1>
     <p>Chém lá trà bằng tay thật. Cần webcam và đủ sáng.</p>
     <button id="start">Bật camera</button>
+
+    <div id="song" hidden>
+      <button id="demo">Chơi nhạc demo</button>
+      <label class="filebtn">
+        Chọn file nhạc
+        <input id="file" type="file" accept="audio/*" hidden>
+      </label>
+      <p class="note">File nhạc không rời khỏi máy bạn.</p>
+    </div>
+
     <p id="status"></p>
   </div>
 

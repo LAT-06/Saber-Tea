@@ -26,6 +26,15 @@ node beatmap.js
 
 Chỉ `beatmap.js` có test (logic thuần). Tracking và render kiểm bằng mắt.
 
+Lúc đang chơi có `window.saberTea` để kiểm từ console: `songTime`, `cursor`,
+`blocks`, `playing`. Lỗi lệch nhịp không nhìn thấy được trong ảnh chụp màn hình,
+phải đo bằng số.
+
+**Đo bên trong `requestAnimationFrame` callback**, đừng đo bằng `setTimeout`.
+`songTime` đọc đồng hồ audio tươi, còn `cursor` chỉ cập nhật mỗi frame — đo lệch
+pha sẽ báo sai hàng loạt. (Đã dính một lần: 16/21 "vi phạm" hoá ra là lỗi phép đo,
+đo lại trong rAF thì 180/180 sạch.)
+
 ## File
 
 | File | Trách nhiệm |
@@ -76,7 +85,7 @@ Mấy con số này sinh ra để chỉnh bằng tai và bằng tay:
 - [x] **Phase 0** — canvas + deploy GitHub Pages
 - [x] **Phase 1** — `tracker.js`, MediaPipe Hands
 - [x] **Phase 2** — `beatmap.js`, onset detection + self-check
-- [ ] **Phase 3** — khối bay đúng nhạc
+- [x] **Phase 3** — khối bay đúng nhạc
 - [ ] **Phase 4** — va chạm + hướng + điểm
 - [ ] **Phase 5** — fallback chuột, particle, UI
 
