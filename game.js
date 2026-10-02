@@ -2,7 +2,7 @@
 // Phase 3: blocks fly out in time with the music. No collision yet.
 
 import { hands, status, startTracking, update as updateTracking } from './tracker.js';
-import { detectOnsets, onsetsToBlocks, toMono, DIRECTIONS } from './beatmap.js';
+import { detectOnsets, onsetsToBlocks, toMono, judgeHit, multiplier, DIRECTIONS, JUDGE } from './beatmap.js';
 
 const COLOR  = { left: '#ff4d6d', right: '#a8cf8e' };
 const TRAVEL = 2.0;    // seconds a block spends flying at the player
@@ -46,6 +46,10 @@ let blocks = [];
 let cursor = 0;        // first block not yet past the hit plane
 let startedAt = 0;     // audioCtx.currentTime when the song began
 let playing = false;
+
+const score = { points: 0, combo: 0, best: 0, hits: 0, misses: 0 };
+const particles = [];
+let lastMs = 0;
 
 // --- setup -----------------------------------------------------------------
 
@@ -94,6 +98,8 @@ async function begin(getBuffer) {
   const onsets = detectOnsets(toMono(channels), buffer.sampleRate);
   blocks = onsetsToBlocks(onsets);
   cursor = 0;
+  particles.length = 0;
+  Object.assign(score, { points: 0, combo: 0, best: 0, hits: 0, misses: 0 });
 
   if (!blocks.length) {
     statusEl.textContent = 'Không tìm thấy nhịp nào trong file này. Thử bài khác.';
@@ -317,26 +323,35 @@ function frame(ms) {
   const L = videoLayout();
   drawVideo(L);
 
+  // Particles are cosmetic, so a frame delta is the right clock for them —
+  // unlike blocks, nothing about them has to stay in step with the music.
+  const dt = Math.min(0.05, (ms - lastMs) / 1000) || 0;
+  lastMs = ms;
+
   if (playing) {
-    // Every position below is a pure function of this one number. Accumulating
-    // rAF deltas instead would drift out of the music and never recover.
+    // Every block position below is a pure function of this one number.
+    // Accumulating rAF deltas instead would drift out of the music and never
+    // recover.
     const songTime = audioCtx.currentTime - startedAt;
     const g = grid();
     drawGrid(g);
 
-    while (cursor < blocks.length && blocks[cursor].time < songTime) cursor++;
+    retire(songTime);
+    checkHits(songTime, g, L);
 
     // Painter's algorithm: the farthest block is drawn first, so nearer ones
     // overlap it correctly.
     let last = cursor;
     while (last < blocks.length && blocks[last].time - songTime < TRAVEL) last++;
-    for (let i = last - 1; i >= cursor; i--) drawBlock(blocks[i], songTime, g);
-
-    drawHud(songTime);
+    for (let i = last - 1; i >= cursor; i--) {
+      if (!blocks[i].hit) drawBlock(blocks[i], songTime, g);
+    }
   }
 
+  updateParticles(dt);
   drawSaber(hands.left,  COLOR.left,  L);
   drawSaber(hands.right, COLOR.right, L);
+  if (playing) drawHud();
 
   if (!hands.left.active && !hands.right.active) {
     ctx.save();
@@ -350,11 +365,89 @@ function frame(ms) {
   requestAnimationFrame(frame);
 }
 
-function drawHud(songTime) {
+// --- scoring ---------------------------------------------------------------
+
+// A block whose window has closed is gone, hit or not. Walking the cursor here
+// rather than scanning the whole chart keeps this O(blocks that just expired).
+function retire(songTime) {
+  while (cursor < blocks.length && songTime > blocks[cursor].time + JUDGE.window) {
+    if (!blocks[cursor].hit) {
+      score.misses++;
+      score.combo = 0;
+    }
+    cursor++;
+  }
+}
+
+function checkHits(songTime, g, L) {
+  const reach = g.cell * 0.6;
+  const minSpeed = g.cell * 3;   // must cross three cells a second to count
+
+  for (let i = cursor; i < blocks.length && blocks[i].time - songTime <= JUDGE.window; i++) {
+    const block = blocks[i];
+    if (block.hit) continue;
+
+    const hand = hands[block.hand];
+    if (!hand.active) continue;
+
+    // Velocity is normalised to the video frame; the arrow is drawn in screen
+    // space. Converting here keeps the angle test honest on any aspect ratio.
+    const vel = { x: hand.vel.x * L.dw, y: hand.vel.y * L.dh };
+    const target = laneCenter(g, block.lane, block.row);
+
+    if (judgeHit(block, songTime, toScreen(hand.tip, L), vel, target, reach, minSpeed) !== 'hit') continue;
+
+    block.hit = true;
+    score.hits++;
+    score.combo++;
+    score.best = Math.max(score.best, score.combo);
+    score.points += 100 * multiplier(score.combo);
+    burst(target.x, target.y, COLOR[block.hand]);
+  }
+}
+
+function burst(x, y, color) {
+  for (let i = 0; i < 16; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 120 + Math.random() * 280;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, color });
+  }
+}
+
+function updateParticles(dt) {
   ctx.save();
-  ctx.fillStyle = 'rgba(232,240,232,.55)';
-  ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(`${Math.max(0, songTime).toFixed(1)}s · ${cursor}/${blocks.length}`, 18, 28);
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt * 1.8;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 420 * dt;            // a little gravity so sparks fall away
+
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.restore();
+}
+
+function drawHud() {
+  const total = score.hits + score.misses;
+  const accuracy = total ? Math.round(score.hits / total * 100) : 100;
+  const mult = multiplier(score.combo);
+
+  ctx.save();
+  ctx.fillStyle = '#e8f0e8';
+  ctx.font = '600 30px system-ui, sans-serif';
+  ctx.fillText(score.points.toLocaleString('vi-VN'), 20, 42);
+
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillStyle = score.combo > 0 ? COLOR.right : 'rgba(232,240,232,.4)';
+  ctx.fillText(`combo ${score.combo}  ×${mult}`, 20, 66);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(232,240,232,.5)';
+  ctx.fillText(`${accuracy}%  ·  ${score.hits}/${total}`, W - 20, 42);
   ctx.restore();
 }
 
@@ -377,6 +470,8 @@ window.saberTea = {
   get cursor()   { return cursor; },
   get blocks()   { return blocks; },
   get playing()  { return playing; },
+  get score()    { return score; },
+  grid, laneCenter, toScreen, videoLayout,
 };
 
 requestAnimationFrame(frame);

@@ -144,6 +144,48 @@ export function onsetsToBlocks(onsets, opts = {}) {
   return blocks;
 }
 
+// --- judging ---------------------------------------------------------------
+
+export const JUDGE = {
+  window: 0.15,                                  // seconds either side of the beat
+  cosTolerance: Math.cos(50 * Math.PI / 180),    // slash within 50° of the arrow
+};
+
+/**
+ * Decide whether a swing cuts a block.
+ *
+ * Pure and screen-space: the caller converts hand coordinates and velocity to
+ * pixels first, so the angle test is done in the space the arrow is drawn in.
+ * Normalised video coordinates would skew every diagonal by the aspect ratio.
+ *
+ * Returns the reason it failed rather than a bare false — tuning the game means
+ * knowing whether players are too slow or just off-angle.
+ *
+ * @returns {'hit'|'closed'|'far'|'slow'|'wrongWay'}
+ */
+export function judgeHit(block, songTime, tip, vel, target, reach, minSpeed) {
+  if (Math.abs(songTime - block.time) > JUDGE.window) return 'closed';
+
+  const dx = tip.x - target.x;
+  const dy = tip.y - target.y;
+  if (dx * dx + dy * dy > reach * reach) return 'far';
+
+  const speed = Math.hypot(vel.x, vel.y);
+  if (speed < minSpeed) return 'slow';
+
+  // cos of the angle between swing and arrow, compared directly — acos would
+  // cost a transcendental per block per frame and tell us nothing extra.
+  const d = DIRECTIONS[block.dir];
+  if ((vel.x * d.x + vel.y * d.y) / speed < JUDGE.cosTolerance) return 'wrongWay';
+
+  return 'hit';
+}
+
+/** Combo multiplier, doubling every 8 hits and capped at 8x. */
+export function multiplier(combo) {
+  return Math.min(8, 2 ** Math.floor(combo / 8));
+}
+
 /** Mix a stereo (or any-channel) AudioBuffer down to one Float32Array. */
 export function toMono(channels) {
   if (channels.length === 1) return channels[0];
@@ -230,6 +272,51 @@ function demo() {
   // Same seed, same chart — otherwise a bug is a different bug every run.
   ok(JSON.stringify(onsetsToBlocks(onsets)) === JSON.stringify(blocks),
      'mapping is deterministic');
+
+  judgeDemo();
+}
+
+function judgeDemo() {
+  const target = { x: 300, y: 200 };
+  const reach = 70, minSpeed = 300;
+  const DOWN = DIRECTIONS.findIndex(d => d.name === 'down');
+  const block = { time: 10, hand: 'right', lane: 2, row: 1, dir: DOWN };
+
+  // A swing at `deg` clockwise from straight down, through the block centre.
+  const swing = (deg, speed = 800) => {
+    const a = Math.PI / 2 + deg * Math.PI / 180;   // 0° == +y == down
+    return { x: Math.cos(a) * speed, y: Math.sin(a) * speed };
+  };
+  const judge = (deg, t = 10, tip = target, speed = 800) =>
+    judgeHit(block, t, tip, swing(deg, speed), target, reach, minSpeed);
+
+  ok(judge(0) === 'hit', 'dead-on downward slash hits');
+
+  // The 50° tolerance is the knob the whole game feel hangs on, so pin both
+  // sides of it rather than just the happy path.
+  ok(judge(49) === 'hit',       'slash 49° off still hits');
+  ok(judge(-49) === 'hit',      'slash 49° off the other way still hits');
+  ok(judge(51) === 'wrongWay',  'slash 51° off is rejected');
+  ok(judge(180) === 'wrongWay', 'slashing straight backwards is rejected');
+
+  ok(judge(0, 10.14) === 'hit',    'hit 140ms late is inside the window');
+  ok(judge(0, 10.16) === 'closed', 'hit 160ms late is outside the window');
+  ok(judge(0, 9.84)  === 'closed', 'hit 160ms early is outside the window');
+
+  ok(judge(0, 10, { x: target.x + 69, y: target.y }) === 'hit',  'just within reach hits');
+  ok(judge(0, 10, { x: target.x + 71, y: target.y }) === 'far',  'just beyond reach misses');
+
+  ok(judge(0, 10, target, 299) === 'slow', 'a slow drift is not a slash');
+  ok(judge(0, 10, target, 301) === 'hit',  'just above the speed floor counts');
+
+  // Order matters: an out-of-window swing must report 'closed' even when it is
+  // also too far and too slow, or tuning readouts lie about why players miss.
+  ok(judgeHit(block, 11, { x: 0, y: 0 }, { x: 0, y: 1 }, target, reach, minSpeed) === 'closed',
+     'window is checked before distance and speed');
+
+  ok([0, 7].every(c => multiplier(c) === 1) && multiplier(8) === 2 &&
+     multiplier(16) === 4 && multiplier(24) === 8 && multiplier(999) === 8,
+     'combo multiplier doubles every 8 and caps at 8x');
 }
 
 if (typeof process !== 'undefined' && process.argv[1]?.endsWith('beatmap.js')) demo();
