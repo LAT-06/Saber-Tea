@@ -75,7 +75,7 @@ Mấy con số này sinh ra để chỉnh bằng tai và bằng tay:
 
 - [x] **Phase 0** — canvas + deploy GitHub Pages
 - [x] **Phase 1** — `tracker.js`, MediaPipe Hands
-- [ ] **Phase 2** — `beatmap.js`, onset detection + self-check
+- [x] **Phase 2** — `beatmap.js`, onset detection + self-check
 - [ ] **Phase 3** — khối bay đúng nhạc
 - [ ] **Phase 4** — va chạm + hướng + điểm
 - [ ] **Phase 5** — fallback chuột, particle, UI
