@@ -42,7 +42,7 @@ function setStatus(state, message = '') {
 }
 
 export async function startTracking() {
-  setStatus('loading', 'Đang mở camera…');
+  setStatus('loading', 'Opening camera…');
 
   video = document.createElement('video');
   video.playsInline = true;      // iOS refuses to play inline without this
@@ -57,7 +57,7 @@ export async function startTracking() {
   video.srcObject = stream;
   await video.play();
 
-  setStatus('loading', 'Đang tải model nhận diện tay…');
+  setStatus('loading', 'Loading hand tracking model…');
 
   const { FilesetResolver, HandLandmarker } = await import(`${CDN}/vision_bundle.mjs`);
   const fileset = await FilesetResolver.forVisionTasks(`${CDN}/wasm`);

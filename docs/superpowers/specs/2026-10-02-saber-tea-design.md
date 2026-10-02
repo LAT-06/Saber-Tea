@@ -1,292 +1,307 @@
-# Saber-Tea — Thiết kế
+# Saber-Tea — Design
 
-Ngày: 2026-10-02
-Trạng thái: đã duyệt, chờ lập kế hoạch thực thi
+Date: 2026-10-02
+Status: approved, built through phase 5
 
-## 1. Game là gì
+## 1. What the game is
 
-Game nhịp điệu chạy trên trình duyệt, lấy cảm hứng từ Beat Saber. Người chơi
-dùng **hai bàn tay thật trước webcam** để chém các khối bay tới theo nhạc. Khối
-là **logo lá trà của CLB**.
+A browser rhythm game in the spirit of Beat Saber. Players use **both bare
+hands in front of a webcam** to slash blocks flying at them in time with the
+music. The blocks are the club's tea-leaf logo.
 
-Không có VR, không có tay cầm. Chỉ cần trình duyệt và webcam.
+No VR, no controllers. A browser and a webcam.
 
-### Cơ chế ship bản đầu
+### Mechanics in the first release
 
-| Cơ chế | Có | Ghi chú |
+| Mechanic | In | Notes |
 |---|---|---|
-| Chém đúng màu (2 tay) | ✅ | Lõi |
-| Chém đúng hướng (mũi tên) | ✅ | Dung sai ±50° |
-| Fallback chuột / cảm ứng | ✅ | Bắt buộc vì web public |
-| Né tường (cúi/nghiêng) | ❌ | Cần Pose Landmarker, không chơi được khi ngồi bàn |
+| Slash the matching colour (two hands) | ✅ | The core |
+| Slash in the arrow's direction | ✅ | ±50° tolerance |
+| Mouse / touch fallback | ✅ | Mandatory for a public site |
+| Dodge walls (duck, lean) | ❌ | Needs Pose Landmarker; unplayable seated at a desk |
 
-Bỏ né tường kéo theo **bỏ hẳn model thứ hai** — chỉ còn Hand Landmarker.
+Dropping walls drops **the second model entirely**. Only Hand Landmarker
+remains.
 
-## 2. Bối cảnh & ràng buộc
+## 2. Context and constraints
 
-- **Web public.** Ai cũng mở được bằng URL, trên laptop hoặc điện thoại.
-- Phải chịu được: webcam kém, ánh sáng xấu, người dùng từ chối quyền camera,
+- **Public web.** Anyone opens a URL, on a laptop or a phone.
+- Has to survive: poor webcams, bad light, denied camera permission,
   Safari/iOS.
-- **`getUserMedia` chỉ chạy trên HTTPS hoặc `localhost`.** Ràng buộc cứng, quyết
-  định luôn cách deploy.
-- Không backend, không tài khoản, không database.
+- **`getUserMedia` only runs over HTTPS or on `localhost`.** A hard constraint,
+  and it alone decides how this deploys.
+- No backend, no accounts, no database.
 
-## 3. Ba quyết định kỹ thuật cốt lõi
+## 3. Three core technical decisions
 
-### 3.1 Trục Z chỉ là đồng hồ, không phải không gian thật
+### 3.1 The Z axis is a clock, not a space
 
-Khối sinh ra lúc `t`, phải bị chém lúc `t + 2s`. MediaPipe trả toạ độ tay **2D**
-(x, y chuẩn hoá 0–1). Nên va chạm thực chất là bài toán **2D + thời gian**.
-Không có phép tính 3D thật nào xảy ra trong game này.
+A block spawns at `t` and must be cut at `t + 2s`. MediaPipe returns **2D**
+hand coordinates (x, y normalised 0–1). So collision is really a problem of
+**2D plus time**. No genuine 3D arithmetic happens in this game.
 
-Hệ quả: **render bằng Canvas 2D với phối cảnh giả** (scale theo thời gian còn
-lại, dịch về điểm tụ). Logo là sprite phẳng nên render 3D thật cũng ra hình gần
-y hệt, mà lại phải thêm một lớp chiếu toạ độ tay 2D vào không gian 3D — thêm chỗ
-sai, không thêm gì về hình ảnh.
+Consequence: **render on a 2D canvas with fake perspective** (scale by the time
+remaining, converge on a vanishing point). The logo is a flat sprite, so real
+3D would produce nearly the same picture while adding a layer that projects 2D
+hand coordinates into a 3D space — one more place to be wrong, for no visual
+gain.
 
-Đã cân nhắc và loại: Three.js (+~170KB, lợi ích chỉ là bloom đẹp hơn),
-CSS 3D transforms (30–60 div cùng lúc sẽ ì, không vẽ được particle).
+Considered and rejected: Three.js (+~170KB, buys only a nicer bloom) and CSS 3D
+transforms (30–60 simultaneous divs bog down, and particles are impossible).
 
-### 3.2 Mọi thứ chạy theo `audio.currentTime`
+### 3.2 Everything runs off the audio clock
 
-Vị trí mỗi khối là **hàm thuần của `audio.currentTime`**, không bao giờ cộng dồn
-delta của `requestAnimationFrame`.
+A block's position is a **pure function of the audio clock**. Frame deltas are
+never accumulated.
 
-Đây là chỗ mọi game nhịp điệu chết: rAF tụt frame → khối lệch nhạc dần và không
-bao giờ bắt lại được. Lấy mốc từ chính thẻ audio thì tụt frame chỉ làm giật
-hình, không làm lệch nhịp.
+This is where every rhythm game dies: a dropped frame shifts blocks off the
+music permanently and nothing brings them back. Reading the clock from the
+audio itself means a dropped frame only stutters the picture.
 
-### 3.3 Lật gương toạ độ, nhưng không lật nhãn tay
+Implementation note: playback goes through an `AudioBufferSourceNode` and the
+clock is `audioCtx.currentTime - startedAt`. The buffer was already decoded for
+analysis, so playing it through the same context is free, sample-accurate, and
+removes the need for an `<audio>` element.
 
-> **Đính chính so với bản nháp đầu.** Bản nháp ghi "phải đảo nhãn tay". Sai.
-> Đã kiểm chứng bằng ảnh test của MediaPipe và kết quả ngược lại.
+### 3.3 Flip the coordinates, not the handedness labels
 
-Hai thứ nghe giống nhau nhưng tách rời:
+> **Correction to the first draft.** The draft said the hand labels must be
+> swapped. That was wrong; MediaPipe's own test image proves the opposite.
 
-**Toạ độ: phải lật.** `x_screen = 1 - x_landmark`. Người chơi vơ tay sang phải
-thì kiếm trên màn hình phải chạy sang phải, như soi gương.
+Two things that sound alike but are separate:
 
-**Nhãn `"Left"`/`"Right"`: KHÔNG đảo.** Nhãn suy ra từ **hình dạng** bàn tay
-trong khung hình, không phải vị trí. Feed webcam thô cho ra đúng tay thật.
+**Coordinates: flip them.** `x_screen = 1 - x_landmark`. The player moves right,
+the saber on screen moves right, as in a mirror.
 
-Bằng chứng — chạy detector trên ảnh test `woman_hands.jpg`:
+**`"Left"`/`"Right"` labels: do NOT swap.** Handedness is inferred from the
+**shape** of the hand in frame, not its position, so the raw feed already names
+the player's real hand.
 
-| Ảnh | Kết quả |
+Evidence — running the detector on the test photo `woman_hands.jpg`:
+
+| Image | Result |
 |---|---|
-| Gốc (chưa lật) | `Left@x=0.068`, `Right@x=0.726` — khớp ground truth |
-| Lật gương | `Left@x=0.274`, `Right@x=0.93` — nhãn đổi chỗ |
+| Original (unmirrored) | `Left@x=0.068`, `Right@x=0.726` — matches ground truth |
+| Mirrored | `Left@x=0.274`, `Right@x=0.93` — labels swap |
 
-Bẫy thật nằm ở điều kiện: **nếu lật chính khung hình trước khi đưa vào detector
-thì phải đảo nhãn lại.** Ta chỉ lật toạ độ đầu ra, không bao giờ lật pixel đầu
-vào — nên không đảo. Ghi comment thẳng vào `tracker.js`.
+The real trap is the condition: **if the frame itself is ever flipped before it
+reaches the detector, the labels must be swapped back.** Only the output
+coordinates are flipped here, never the input pixels — so no swap. The comment
+lives in `tracker.js`.
 
-## 4. Kiến trúc production
+## 4. Production architecture
 
-### 4.1 Hình dạng hệ thống
+### 4.1 Shape of the system
 
-**Static site thuần. Không backend. Không build step.**
+**A plain static site. No backend. No build step.**
 
 ```
-Trình duyệt người chơi
+Player's browser
 ├── index.html  ──┐
-├── tracker.js    │  ES modules, serve nguyên trạng
+├── tracker.js    │  ES modules, served as-is
 ├── beatmap.js    │  <script type="module">
 ├── game.js     ──┘
 ├── assets/Icon Transparent.png
 │
-├── CDN jsDelivr ──→ @mediapipe/tasks-vision (JS + WASM, phiên bản ghim cứng)
-├── CDN Google  ──→ hand_landmarker.task (~7.5MB, cache sau lần đầu)
-└── File nhạc  ──→ do người chơi chọn từ máy, KHÔNG rời khỏi máy
+├── jsDelivr CDN ──→ @mediapipe/tasks-vision (JS + WASM, version pinned)
+├── Google CDN   ──→ hand_landmarker.task (~7.5MB, cached after first load)
+└── Audio file   ──→ chosen by the player, NEVER leaves their machine
 ```
 
-Không webpack/vite/bundler. ES modules native đủ dùng, và bỏ build step nghĩa là
-deploy chỉ là push code.
+No webpack, no vite, no bundler. Native ES modules are enough, and skipping the
+build step means deploying is just pushing code.
 
 ### 4.2 Hosting
 
-**GitHub Pages, deploy from branch `main`, thư mục gốc.**
+**GitHub Pages, deploy from branch `main`, root directory.**
 
-- Repo đã ở GitHub → Pages miễn phí
-- **HTTPS tự động** → thoả ràng buộc `getUserMedia`
-- Zero config: bật trong Settings → Pages, không cần file workflow
-- Deploy = `git push`
+- The repo is already on GitHub, so Pages is free
+- **HTTPS automatically** — satisfies the `getUserMedia` constraint
+- Zero config: switch it on in Settings → Pages, no workflow file
+- Deploying is `git push`
 
-### 4.3 Nhạc: người chơi tự chọn file
+Live at https://lat-06.github.io/Saber-Tea/
+
+### 4.3 Music: the player brings their own file
 
 `<input type="file" accept="audio/*">` → `decodeAudioData`.
 
-Giải quyết luôn ba thứ cùng lúc: không tốn băng thông host nhạc, **không vướng
-bản quyền**, và file nhạc không bao giờ rời khỏi máy người chơi. Kèm một bài
-demo ngắn trong repo để ai vào cũng bấm chơi được ngay, không phải đi tìm file.
+This solves three things at once: no bandwidth spent hosting music, **no
+copyright question**, and the audio never leaves the player's machine. A short
+demo track ships with the game so anyone can press play without hunting for a
+file.
 
-### 4.4 Lưu trữ
+### 4.4 Storage
 
-`localStorage` cho điểm cao. Hết. Không server, không tài khoản, không
+`localStorage` for the high score. That is all. No server, no accounts, no
 leaderboard.
 
-### 4.5 Hiệu năng
+### 4.5 Performance
 
-- Hand Landmarker chạy ~30fps, render chạy rAF 60fps, **dùng kết quả landmark
-  mới nhất, không nội suy**
-- Model ~7.5MB tải từ CDN Google, trình duyệt cache sau lần đầu
-- Màn hình loading có thanh tiến độ ở lần đầu vào
+- Hand Landmarker runs at ~30fps, rendering at 60fps; **the latest landmark
+  result is reused, never interpolated**
+- The ~7.5MB model loads from Google's CDN and is cached after the first visit
+- A loading state covers the first load
 
-## 5. Thiết kế chi tiết
+## 5. Detailed design
 
-### 5.1 File
+### 5.1 Files
 
-| File | Trách nhiệm | Phụ thuộc |
+| File | Responsibility | Depends on |
 |---|---|---|
-| `index.html` | canvas, `<video>` ẩn, UI (chọn nhạc, điểm, loading) | — |
-| `tracker.js` | MediaPipe Hands → vị trí 2 tay; fallback chuột | tasks-vision |
-| `beatmap.js` | PCM → danh sách khối. **Hàm thuần, test được bằng node** | không |
-| `game.js` | vòng lặp, va chạm, vẽ, điểm | tracker, beatmap |
-| `package.json` | chỉ chứa `{"type":"module"}` | — |
+| `index.html` | canvas, hidden `<video>`, UI | — |
+| `tracker.js` | MediaPipe Hands → two hand positions; pointer fallback | tasks-vision |
+| `beatmap.js` | PCM → blocks, and judging a cut. **Pure, node-testable** | nothing |
+| `game.js` | loop, collision, drawing, scoring | tracker, beatmap |
+| `package.json` | contains only `{"type":"module"}` | — |
 
-`package.json` tồn tại vì **một lý do duy nhất**: để `node beatmap.js` hiểu được
-cú pháp `export`. Không có dependency, không có script, không có bước cài đặt.
+`beatmap.js` imports nothing from Web Audio — it takes a `Float32Array` and
+returns plain objects. Decoding lives in `game.js`. That boundary is the entire
+reason `node beatmap.js` can check it.
 
-`beatmap.js` không được import gì từ Web Audio — nó nhận `Float32Array` và trả
-mảng khối. Giải mã audio nằm ở `game.js`. Ranh giới này là thứ làm cho nó test
-được bằng `node`.
+`package.json` exists for **one reason**: so `node beatmap.js` understands
+`export`. No dependencies, no scripts, no install step.
 
-### 5.2 Điểm theo dõi trên bàn tay
+### 5.2 Which landmarks are tracked
 
-- **Landmark 8 (đầu ngón trỏ)** = mũi kiếm → dùng cho va chạm và vận tốc
-- **Landmark 0 (cổ tay)** = chuôi kiếm → vector cổ tay→ngón trỏ cho hướng vẽ lưỡi kiếm
+- **Landmark 8 (index fingertip)** = blade tip → used for collision and velocity
+- **Landmark 0 (wrist)** = hilt → the wrist→fingertip vector draws the blade
 
-Hai điểm này về cùng một lần gọi API, không tốn thêm gì.
+Both come from the same detect call, so the second costs nothing.
 
-### 5.3 Onset detection — không cần FFT
+### 5.3 Onset detection — no FFT required
 
 ```
 1. PCM → mono
-2. Lowpass một cực (nhấn tiếng kick drum)
-3. RMS theo khung 1024 mẫu, hop 512  (~86 khung/giây ở 44.1kHz)
-4. Đánh dấu onset khi CẢ BA điều kiện đúng:
-     - năng lượng > 1.3 × trung bình trượt 0.5s
-     - là cực đại cục bộ
-     - cách onset trước ≥ 120ms
+2. One-pole lowpass (leans on the kick drum)
+3. RMS over 1024-sample windows, hop 512  (~86 frames/second at 44.1kHz)
+4. Mark an onset when ALL THREE hold:
+     - energy > 1.3 × the trailing 0.5s average
+     - it is a local maximum
+     - at least 120ms since the last onset
 ```
 
-Khoảng 40 dòng, không thư viện DSP. Lowpass thay cho FFT: đủ để bắt kick, mà rẻ
-hơn nhiều.
+About 40 lines, no DSP library. The lowpass stands in for an FFT: enough to
+catch the kick, far cheaper.
 
-Ngưỡng `1.3` và `120ms` là **núm chỉnh**, để lộ ra thành hằng số có tên. Nhạc
-thật không giống nhạc lý tưởng — sẽ phải tinh chỉnh bằng tai.
+The trailing average deliberately **excludes the frame under test**, so a loud
+frame cannot raise its own bar. A floor at 5% of peak stops a quiet intro from
+charting hiss.
 
-### 5.4 Onset → khối
+`1.3` and `120ms` are **knobs**, exposed as named constants.
 
-Luân phiên tay trái/phải. Lane lệch về phía tay đó. Hướng mũi tên xoay dần từ
-hướng trước (tránh chuỗi hướng ngẫu nhiên vô nghĩa).
+### 5.4 Onsets → blocks
 
-**Chặn cứng: cùng một tay cách nhau tối thiểu 200ms**, không thoả thì bỏ onset
-đó. Người thật không chém kịp nhanh hơn thế.
+Hands alternate. Each hand keeps to its own half of the grid (crossovers are
+miserable to hit on a webcam). Arrow direction rotates from the previous one,
+avoiding a meaningless random sequence.
 
-Lưới 4 cột × 3 hàng, như Beat Saber gốc.
+**Hard rule: 200ms minimum between swings of the same hand**, and an onset that
+breaks it is dropped. Nobody swings faster than that.
 
-### 5.5 Vòng lặp một frame
+A 4-column × 3-row grid, as in Beat Saber.
+
+A seeded PRNG keeps charts reproducible: the same song always maps the same
+way, so a bug is the same bug every run.
+
+### 5.5 One frame
 
 ```
-landmarks ← tracker (kết quả mới nhất)
-t ← audio.currentTime
+landmarks ← tracker (latest result)
+t ← audio clock
 
-với mỗi khối còn sống:
-    tiến độ = (t - khối.time + 2.0) / 2.0        # bay 2 giây
-    scale, vị trí ← phối cảnh(tiến độ, lane, row)
+for each live block:
+    depth    = (block.time - t) / 2.0           # 2 seconds of flight
+    position = perspective(depth, lane, row)
 
-    nếu |t - khối.time| < 0.15:                  # cửa sổ chém
-        nếu đầu ngón trỏ gần khối
-           và tốc độ ngón tay > ngưỡng
-           và góc(vận tốc, hướng yêu cầu) < 50°:
-               ăn điểm, nổ particle, xoá khối
+    if |t - block.time| < 0.15:                 # hit window
+        if the fingertip is near the block
+           and finger speed > threshold
+           and angle(velocity, required direction) < 50°:
+               score, burst particles, remove the block
 
-    nếu t > khối.time + 0.15:  tính miss, xoá khối
+    if t > block.time + 0.15:  count a miss, remove the block
 
-vẽ
+draw
 ```
 
-Vận tốc ngón tay lấy từ 3 frame gần nhất (ở 30fps, một cú chém kéo dài khoảng
-4–6 frame).
+Finger velocity spans the last 3 frames (a slash lasts roughly 4–6 frames at
+30fps).
 
-**Dung sai góc 50°** — rộng có chủ đích. Webcam nhiễu; siết chặt hơn thì không
-ai chém trúng và game thành bực mình. Đây cũng là núm chỉnh.
+**50° of tolerance** — wide on purpose. Webcams are noisy; tighten it and
+nobody connects, and the game becomes an irritation. Another knob.
 
-### 5.6 Màu
+### 5.6 Colour
 
-Logo vốn xanh lá. Quy ước:
+The logo is green. The convention:
 
-- **Tay trái** = lá nhuộm đỏ hồng
-- **Tay phải** = lá xanh gốc
+- **Left hand** = pink-red
+- **Right hand** = the logo's native green
 
-Để thành hằng số ở đầu `game.js`, đổi trong 10 giây nếu CLB muốn khác.
+Importantly, **the logo itself is never tinted** — hands are told apart by the
+frame and glow around the block. That keeps the logo on-brand and sidesteps
+patchy `ctx.filter` support.
 
 ### 5.7 Fallback
 
-Chuyển sang chuột/cảm ứng khi: không cấp quyền camera, hoặc **3 giây liên tục
-không phát hiện bàn tay nào**.
+Switches to mouse/touch when the camera is refused, or after **3 continuous
+seconds with no hand detected**.
 
-Chế độ fallback: một kiếm, chém được cả hai màu. Có nút bật lại chế độ tay.
+In fallback, one pointer drives **both** sabers, so blocks of either colour are
+reachable and the collision code needs no special case. A button switches back
+to hands.
 
-Trên web public đây không phải tính năng phụ — thiếu nó thì một phần lớn người
-vào chỉ thấy màn hình đen.
+On a public site this is not a nice-to-have: without it, a large share of
+visitors see a black screen.
 
-## 6. Kiểm thử
+## 6. Testing
 
-`detectOnsets(pcm, sampleRate)` là hàm thuần → một self-check chạy được:
+`detectOnsets(pcm, sampleRate)` and `judgeHit(...)` are pure, so one runnable
+self-check covers both:
 
 ```bash
 node beatmap.js
 ```
 
-Dựng click track nhân tạo (xung mỗi 0.5s), assert số onset đúng và sai lệch
-< 30ms. Không framework, không fixture.
+22 checks. A synthetic click track verifies onset count and timing; the judging
+checks pin **both sides** of every threshold (49° hits and 51° misses, 140ms
+hits and 160ms misses, 69px hits and 71px misses). No framework, no fixtures.
 
-Phần còn lại (tracking, render) kiểm bằng mắt theo từng phase — viết test cho
-webcam và canvas tốn nhiều hơn giá trị nó mang lại ở quy mô này.
+Everything else — tracking, rendering — is checked by eye, phase by phase.
+Writing tests for a webcam and a canvas costs more than it returns at this size.
 
-## 7. Chia nhỏ công việc
+## 7. Work breakdown
 
-**Quy tắc: mỗi phase code xong → cập nhật `CLAUDE.md` → commit → push.**
+**Rule: finish a phase → update `CLAUDE.md` → commit → push.**
 
-Không dồn toàn bộ game vào một lượt. Mỗi phase phải tự chạy được và tự kiểm
-chứng được trước khi sang phase sau.
+No dumping the whole game in one pass. Each phase has to run and be verifiable
+before the next begins.
 
-| Phase | Nội dung | Cách kiểm chứng |
+| Phase | Content | How it was verified |
 |---|---|---|
-| **0** | `index.html` + canvas vẽ một hình. Bật GitHub Pages. | Mở URL Pages thấy hình |
-| **1** | `tracker.js`: MediaPipe Hands, chấm điểm lên đầu ngón trỏ trên video lật gương | Vơ tay, chấm bám theo; nhãn trái/phải đúng |
-| **2** | `beatmap.js`: `detectOnsets` + `onsetsToBlocks` + self-check | `node beatmap.js` assert pass |
-| **3** | `game.js`: chọn file nhạc + bài demo kèm repo, khối bay ra đúng nhịp. Chưa va chạm. | Nhìn/nghe thấy khối khớp nhạc |
-| **4** | Va chạm + hướng + điểm + combo | Chém trúng ăn điểm; chém sai hướng thì trượt |
-| **5** | Fallback chuột, particle, glow, UI, điểm cao localStorage | Tắt camera vẫn chơi được |
+| **0** | `index.html` + canvas. Enable GitHub Pages. | Pages URL renders |
+| **1** | `tracker.js`: MediaPipe Hands, mirrored video, fingertip tracking | Test photo through a fake camera; coordinates and labels correct |
+| **2** | `beatmap.js`: `detectOnsets` + `onsetsToBlocks` + self-check | `node beatmap.js` passes |
+| **3** | `game.js`: pick a song, blocks fly in time. No collision. | Cursor/clock invariant, 180/180 samples |
+| **4** | Collision + direction + score + combo | Threshold checks; bookkeeping balances exactly |
+| **5** | Pointer fallback, particles, UI, localStorage high score | Playable with no camera at all |
 
-Phase 0 đứng đầu có lý do: chứng minh đường deploy thông **trước khi** viết logic
-game, tránh cảnh "chạy ngon ở máy, chết trên Pages" lúc đã viết xong hết.
+Phase 0 came first on purpose: prove the deploy path works **before** writing
+game logic, rather than discovering "works locally, dead on Pages" at the end.
 
-### Quy ước commit
+### Commit convention
 
 Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`.
-Mỗi phase ít nhất một commit, push ngay sau commit.
+At least one commit per phase, pushed immediately.
 
-### `CLAUDE.md` giữ gì
+## 8. Deliberately not built
 
-Để phiên làm việc sau không phải dò lại từ đầu:
-
-- Game là gì, chơi thế nào
-- Bản đồ file + trách nhiệm từng file
-- **Ba cái bẫy ở mục 3** (timing theo `audio.currentTime`, lật gương, đảo nhãn tay)
-- Cách chạy local, cách chạy test
-- Phase đang ở đâu
-
-## 8. Cố tình không làm
-
-| Bỏ | Thêm lại khi |
+| Dropped | Add it when |
 |---|---|
-| Tường / né người | Có người chơi đứng xa webcam thật sự |
-| Leaderboard server | Có người hỏi "điểm tôi đứng thứ mấy" |
-| Nhiều mức độ khó | Bản một-độ-khó đã được chơi đủ nhiều |
-| Thư viện nhạc online | Chọn file từ máy tỏ ra bất tiện |
-| Tài khoản người dùng | Không bao giờ, trừ khi có lý do rõ ràng |
-| Service worker / offline | Có người thật phàn nàn về tải lại |
-| Build step (vite/webpack) | ES modules native tỏ ra không đủ |
+| Walls / dodging | Someone actually plays standing well back from the camera |
+| Server leaderboard | Someone asks where their score ranks |
+| Difficulty levels | The single difficulty has been played enough |
+| Online song library | Picking a local file proves inconvenient |
+| User accounts | Never, barring a clear reason |
+| Service worker / offline | A real person complains about reloads |
+| Build step (vite/webpack) | Native ES modules prove insufficient |

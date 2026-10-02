@@ -1,123 +1,130 @@
 # Saber-Tea
 
-Game nhịp điệu chạy trên trình duyệt, kiểu Beat Saber nhưng **không cần VR**.
-Người chơi dùng hai bàn tay thật trước webcam để chém các khối bay tới theo
-nhạc. Khối là logo lá trà của CLB.
+A browser rhythm game in the spirit of Beat Saber, but **without VR**. Players
+slash incoming blocks with their bare hands in front of a webcam. The blocks are
+the club's tea-leaf logo.
 
-Thiết kế đầy đủ: [`docs/superpowers/specs/2026-10-02-saber-tea-design.md`](docs/superpowers/specs/2026-10-02-saber-tea-design.md)
+Full design: [`docs/superpowers/specs/2026-10-02-saber-tea-design.md`](docs/superpowers/specs/2026-10-02-saber-tea-design.md)
 
-## Chạy
+## Running it
 
 ```bash
 python3 -m http.server 8080
 ```
 
-Mở http://localhost:8080
+Then open http://localhost:8080
 
-Không có build step. ES modules native, serve nguyên trạng.
-`getUserMedia` chỉ chạy trên `localhost` hoặc HTTPS — mở bằng `file://` sẽ
-không có webcam.
+No build step. Native ES modules, served as-is.
+`getUserMedia` only works on `localhost` or HTTPS — opening the file over
+`file://` gives you no webcam.
 
-## Test
+## Tests
 
 ```bash
 node beatmap.js
 ```
 
-Chỉ `beatmap.js` có test (logic thuần). Tracking và render kiểm bằng mắt.
+Only `beatmap.js` has tests, because only `beatmap.js` is pure logic. Tracking
+and rendering are checked by eye.
 
-Lúc đang chơi có `window.saberTea` để kiểm từ console: `songTime`, `cursor`,
-`blocks`, `playing`. Lỗi lệch nhịp không nhìn thấy được trong ảnh chụp màn hình,
-phải đo bằng số.
+While a song is playing, `window.saberTea` exposes `songTime`, `cursor`,
+`blocks`, `score` and `playing` for checking from the console. Timing bugs in a
+rhythm game are invisible in a screenshot; they have to be measured.
 
-**Đo bên trong `requestAnimationFrame` callback**, đừng đo bằng `setTimeout`.
-`songTime` đọc đồng hồ audio tươi, còn `cursor` chỉ cập nhật mỗi frame — đo lệch
-pha sẽ báo sai hàng loạt. (Đã dính một lần: 16/21 "vi phạm" hoá ra là lỗi phép đo,
-đo lại trong rAF thì 180/180 sạch.)
+**Measure inside a `requestAnimationFrame` callback, never from `setTimeout`.**
+`songTime` reads the audio clock fresh while `cursor` only updates once a frame,
+so sampling out of phase reports failures that are not there. (This cost an
+investigation once: 16 of 21 "violations" were the measurement, and re-measuring
+inside rAF gave 180 of 180 clean.)
 
-## File
+## Files
 
-| File | Trách nhiệm |
+| File | Responsibility |
 |---|---|
-| `index.html` | canvas, `<video>` ẩn, UI |
-| `game.js` | vòng lặp, va chạm, vẽ, điểm |
-| `tracker.js` | MediaPipe Hands → vị trí 2 tay; fallback chuột |
-| `beatmap.js` | PCM → danh sách khối. **Hàm thuần, không import Web Audio** |
-| `package.json` | chỉ để `node` hiểu `export`. Không dependency. |
+| `index.html` | canvas, hidden `<video>`, UI |
+| `game.js` | loop, collision, drawing, scoring |
+| `tracker.js` | MediaPipe Hands → two hand positions; pointer fallback |
+| `beatmap.js` | PCM → blocks, and judging a cut. **Pure; imports no Web Audio** |
+| `package.json` | exists only so `node` understands `export`. No dependencies. |
 
-## Ba cái bẫy — đọc trước khi sửa code
+## Three traps — read before touching the code
 
-**1. Thời gian lấy từ `audio.currentTime`, không bao giờ cộng dồn delta rAF.**
-Vị trí khối là hàm thuần của `audio.currentTime`. Cộng dồn delta thì khi tụt
-frame, khối lệch nhạc dần và không bao giờ bắt lại được. Đây là chỗ mọi game
-nhịp điệu chết.
+**1. Time comes from the audio clock, never from accumulated rAF deltas.**
+A block's position is a pure function of `audioCtx.currentTime - startedAt`.
+Accumulate frame deltas instead and a dropped frame shifts every block off the
+music permanently, with no way back. This is where rhythm games die.
 
-**2. Video phải lật gương: `x_screen = 1 - x_landmark`.**
-Không lật thì người chơi vơ tay sang phải, hình chạy sang trái.
+**2. The video is mirrored: `x_screen = 1 - x_landmark`.**
+Without the flip, the player moves right and the picture goes left.
 
-**3. KHÔNG đảo nhãn `"Left"`/`"Right"` của MediaPipe — nhưng chỉ khi feed ảnh thô.**
-Nhãn được suy ra từ **hình dạng** bàn tay trong khung hình, không phải từ vị trí.
-Nên feed webcam thô cho ra đúng tay thật của người chơi.
+**3. Do NOT swap MediaPipe's `"Left"`/`"Right"` labels — as long as you feed it
+the raw frame.**
+Handedness is inferred from the **shape** of the hand in frame, not its
+position, so a raw camera feed already reports the player's real hand.
 
-Đã kiểm chứng bằng ảnh test của MediaPipe: lật gương ảnh thì nhãn đổi chỗ
-(`Right@x=0.726` thành `Left@x=0.274`). Chính vì vậy ảnh **chưa** lật mới đúng.
+Verified against MediaPipe's own test photo: mirroring the image swaps the
+labels (`Right@x=0.726` becomes `Left@x=0.274`). That is exactly why the
+**unmirrored** frame is the correct input.
 
-Bẫy nằm ở chỗ: nếu sau này ai đó lật chính khung hình trước khi đưa vào
-detector thì **phải** đảo nhãn lại. Hiện tại ta chỉ lật **toạ độ đầu ra**
-(bẫy số 2), không bao giờ lật pixel đầu vào. Giữ nguyên như vậy.
+The trap is in the condition: if anyone ever flips the frame itself before
+handing it to the detector, the labels **must** be swapped back. Today only the
+output coordinates are flipped (trap 2), never the pixels going in. Keep it
+that way.
 
-## Hai hệ toạ độ — đừng trộn
+## Two coordinate spaces — do not mix them
 
-Landmark bàn tay chuẩn hoá theo **khung camera**. Toạ độ con trỏ chuẩn hoá theo
-**cửa sổ trình duyệt**. Hai phép biến đổi khác nhau thật sự, `layout()` trong
-`game.js` chọn cái nào theo `status.input`. Video giữ phép biến đổi riêng của nó
-(`videoLayout()`, cover-fit), nên trong chế độ chuột vẫn vẽ được video nền mà
-kiếm vẫn đúng chỗ chuột.
+Hand landmarks are normalised to the **camera frame**. Pointer coordinates are
+normalised to the **browser window**. These are genuinely different transforms;
+`layout()` in `game.js` picks one based on `status.input`. The video keeps its
+own (`videoLayout()`, cover-fit), which is why pointer mode can still draw the
+camera behind a saber that tracks the mouse correctly.
 
-Vận tốc cũng phải đổi sang **screen space** trước khi so với mũi tên
-(`vel.x * L.dw`, `vel.y * L.dh`). Để nguyên toạ độ chuẩn hoá thì mọi đường chéo
-bị méo theo tỉ lệ khung hình.
+Velocity must also be converted to **screen space** before it is compared
+against an arrow (`vel.x * L.dw`, `vel.y * L.dh`). Leave it normalised and every
+diagonal is skewed by the aspect ratio.
 
-## Chế độ chuột
+## Pointer mode
 
-Một con trỏ lái **cả hai** kiếm cùng lúc — nên khối màu nào cũng chém được mà
-`checkHits()` không cần một dòng đặc biệt nào. Tự chuyển sang chuột khi camera
-hỏng hoặc 3 giây không thấy tay. Nút góc dưới phải để quay lại tay; nút đó ẩn
-khi không có camera, vì lúc đó không có gì để quay lại.
+A single pointer drives **both** sabers at once, so a block of either colour is
+reachable and `checkHits()` needs no special case whatsoever. It engages when
+the camera fails or after 3 seconds with no hand in frame. The corner button
+switches back; it is hidden when there is no camera to switch back to.
 
-## Sổ sách điểm — bất biến đúng
+## Score bookkeeping — the correct invariant
 
-Không phải `hits + misses === cursor`. Khối chém **sớm** (trong nửa cửa sổ trước
-`block.time`) cộng `hits` ngay nhưng `cursor` chưa đi qua nó. Bất biến đúng:
+Not `hits + misses === cursor`. A block cut **early** (in the half-window before
+`block.time`) scores immediately, but the cursor does not pass it until its
+window closes. The correct form is:
 
 ```
-hits + misses === cursor + (số khối đã chém mà cửa sổ chưa đóng)
+hits + misses === cursor + (blocks already cut whose window is still open)
 ```
 
-Chỉ khi mọi cửa sổ đóng hết thì `hits + misses === cursor` mới chính xác.
+`hits + misses === cursor` holds only once everything has settled.
 
-## Hằng số hay phải chỉnh
+## Knobs worth tuning
 
-Nhạc thật không giống nhạc lý tưởng, webcam thật không giống webcam lý tưởng.
-Mấy con số này sinh ra để chỉnh bằng tai và bằng tay:
+Real music is not ideal music and real webcams are not ideal webcams. These
+numbers exist to be tuned by ear and by hand:
 
-| Hằng số | Mặc định | Ở đâu |
+| Constant | Default | Where |
 |---|---|---|
-| Ngưỡng onset | `1.3×` trung bình trượt | `beatmap.js` |
-| Khoảng cách onset tối thiểu | `120ms` | `beatmap.js` |
-| Cùng tay cách nhau tối thiểu | `200ms` | `beatmap.js` |
-| Thời gian khối bay | `2.0s` | `game.js` |
-| Cửa sổ chém | `±0.15s` | `game.js` |
-| Dung sai hướng chém | `50°` | `game.js` |
+| Onset threshold | `1.3×` trailing average | `beatmap.js` |
+| Minimum gap between onsets | `120ms` | `beatmap.js` |
+| Minimum gap for the same hand | `200ms` | `beatmap.js` |
+| Slash direction tolerance | `50°` | `beatmap.js` (`JUDGE`) |
+| Hit window | `±0.15s` | `beatmap.js` (`JUDGE`) |
+| Block flight time | `2.0s` | `game.js` |
+| Minimum slash speed | `3` cells/second | `game.js` |
 
-## Tiến độ
+## Progress
 
-- [x] **Phase 0** — canvas + deploy GitHub Pages
+- [x] **Phase 0** — canvas + GitHub Pages deploy
 - [x] **Phase 1** — `tracker.js`, MediaPipe Hands
 - [x] **Phase 2** — `beatmap.js`, onset detection + self-check
-- [x] **Phase 3** — khối bay đúng nhạc
-- [x] **Phase 4** — va chạm + hướng + điểm
-- [x] **Phase 5** — fallback chuột, particle, UI
+- [x] **Phase 3** — blocks flying in time with the music
+- [x] **Phase 4** — collision + direction + scoring
+- [x] **Phase 5** — pointer fallback, particles, UI
 
-Quy ước: mỗi phase xong thì cập nhật file này, commit, push.
+Convention: finish a phase, update this file, commit, push.
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`).

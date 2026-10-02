@@ -64,7 +64,7 @@ let lastInput = null;
 
 startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
-  statusEl.textContent = 'Đang mở camera…';
+  statusEl.textContent = 'Opening camera…';
   try {
     video = await startTracking();
     showSongs('');
@@ -73,7 +73,7 @@ startBtn.addEventListener('click', async () => {
     // mean the same thing to the player: the camera is not happening. Hand
     // them the pointer instead of a dead end.
     usePointer(true);
-    showSongs(`Không mở được camera (${err.name || err}). Chơi bằng chuột.`);
+    showSongs(`Camera unavailable (${err.name || err}). Playing with the mouse.`);
   }
 });
 
@@ -99,7 +99,7 @@ modeBtn.addEventListener('click', () => {
 function syncModeButton() {
   // With no camera there is nothing to switch back to, so hide the control.
   modeBtn.hidden = !video;
-  modeBtn.textContent = status.input === 'pointer' ? 'Dùng tay' : 'Dùng chuột';
+  modeBtn.textContent = status.input === 'pointer' ? 'Use hands' : 'Use mouse';
 }
 
 fileInput.addEventListener('change', async () => {
@@ -114,7 +114,7 @@ demoBtn.addEventListener('click', () => begin(() => makeDemoTrack(audioCtx)));
 
 async function begin(getBuffer) {
   songBox.hidden = true;
-  statusEl.textContent = 'Đang phân tích nhạc…';
+  statusEl.textContent = 'Analysing the track…';
   overlay.hidden = false;
 
   audioCtx ??= new AudioContext();
@@ -124,7 +124,7 @@ async function begin(getBuffer) {
   try {
     buffer = await getBuffer();
   } catch (err) {
-    statusEl.textContent = `Không đọc được file nhạc: ${err.name || err}`;
+    statusEl.textContent = `Could not read that audio file: ${err.name || err}`;
     songBox.hidden = false;
     return;
   }
@@ -137,7 +137,7 @@ async function begin(getBuffer) {
   Object.assign(score, { points: 0, combo: 0, best: 0, hits: 0, misses: 0 });
 
   if (!blocks.length) {
-    statusEl.textContent = 'Không tìm thấy nhịp nào trong file này. Thử bài khác.';
+    statusEl.textContent = 'No beat found in that file. Try another track.';
     songBox.hidden = false;
     return;
   }
@@ -180,10 +180,10 @@ function finish() {
   if (isBest) localStorage.setItem(BEST_KEY, String(score.points));
 
   resultEl.innerHTML = `
-    <div class="big">${score.points.toLocaleString('vi-VN')}</div>
-    <div class="row">${accuracy}% chính xác · ${score.hits}/${total} khối · combo ${score.best}</div>
+    <div class="big">${score.points.toLocaleString('en-US')}</div>
+    <div class="row">${accuracy}% accuracy · ${score.hits}/${total} blocks · ${score.best} combo</div>
     <div class="row ${isBest ? 'best' : ''}">${
-      isBest ? 'Điểm cao mới!' : `Điểm cao: ${Math.max(previous, score.points).toLocaleString('vi-VN')}`
+      isBest ? 'New high score!' : `Best: ${Math.max(previous, score.points).toLocaleString('en-US')}`
     }</div>`;
 
   resultEl.hidden = false;
@@ -445,7 +445,7 @@ function frame(ms) {
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(232,240,232,.5)';
       ctx.font = '15px system-ui, sans-serif';
-      ctx.fillText('Giơ tay vào khung hình', W / 2, H - 40);
+      ctx.fillText('Raise your hands into frame', W / 2, H - 40);
       ctx.restore();
     }
   }
@@ -529,7 +529,7 @@ function drawHud() {
   ctx.save();
   ctx.fillStyle = '#e8f0e8';
   ctx.font = '600 30px system-ui, sans-serif';
-  ctx.fillText(score.points.toLocaleString('vi-VN'), 20, 42);
+  ctx.fillText(score.points.toLocaleString('en-US'), 20, 42);
 
   ctx.font = '14px system-ui, sans-serif';
   ctx.fillStyle = score.combo > 0 ? COLOR.right : 'rgba(232,240,232,.4)';
