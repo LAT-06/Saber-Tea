@@ -66,6 +66,36 @@ Bẫy nằm ở chỗ: nếu sau này ai đó lật chính khung hình trước 
 detector thì **phải** đảo nhãn lại. Hiện tại ta chỉ lật **toạ độ đầu ra**
 (bẫy số 2), không bao giờ lật pixel đầu vào. Giữ nguyên như vậy.
 
+## Hai hệ toạ độ — đừng trộn
+
+Landmark bàn tay chuẩn hoá theo **khung camera**. Toạ độ con trỏ chuẩn hoá theo
+**cửa sổ trình duyệt**. Hai phép biến đổi khác nhau thật sự, `layout()` trong
+`game.js` chọn cái nào theo `status.input`. Video giữ phép biến đổi riêng của nó
+(`videoLayout()`, cover-fit), nên trong chế độ chuột vẫn vẽ được video nền mà
+kiếm vẫn đúng chỗ chuột.
+
+Vận tốc cũng phải đổi sang **screen space** trước khi so với mũi tên
+(`vel.x * L.dw`, `vel.y * L.dh`). Để nguyên toạ độ chuẩn hoá thì mọi đường chéo
+bị méo theo tỉ lệ khung hình.
+
+## Chế độ chuột
+
+Một con trỏ lái **cả hai** kiếm cùng lúc — nên khối màu nào cũng chém được mà
+`checkHits()` không cần một dòng đặc biệt nào. Tự chuyển sang chuột khi camera
+hỏng hoặc 3 giây không thấy tay. Nút góc dưới phải để quay lại tay; nút đó ẩn
+khi không có camera, vì lúc đó không có gì để quay lại.
+
+## Sổ sách điểm — bất biến đúng
+
+Không phải `hits + misses === cursor`. Khối chém **sớm** (trong nửa cửa sổ trước
+`block.time`) cộng `hits` ngay nhưng `cursor` chưa đi qua nó. Bất biến đúng:
+
+```
+hits + misses === cursor + (số khối đã chém mà cửa sổ chưa đóng)
+```
+
+Chỉ khi mọi cửa sổ đóng hết thì `hits + misses === cursor` mới chính xác.
+
 ## Hằng số hay phải chỉnh
 
 Nhạc thật không giống nhạc lý tưởng, webcam thật không giống webcam lý tưởng.
@@ -87,7 +117,7 @@ Mấy con số này sinh ra để chỉnh bằng tai và bằng tay:
 - [x] **Phase 2** — `beatmap.js`, onset detection + self-check
 - [x] **Phase 3** — khối bay đúng nhạc
 - [x] **Phase 4** — va chạm + hướng + điểm
-- [ ] **Phase 5** — fallback chuột, particle, UI
+- [x] **Phase 5** — fallback chuột, particle, UI
 
 Quy ước: mỗi phase xong thì cập nhật file này, commit, push.
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`).

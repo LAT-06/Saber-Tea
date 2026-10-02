@@ -25,11 +25,16 @@ function emptyHand() {
 
 export const hands = { left: emptyHand(), right: emptyHand() };
 
-export const status = { state: 'idle', message: '' };
+// `input` is how the player is actually aiming right now: 'hands' or 'pointer'.
+export const status = { state: 'idle', message: '', input: 'hands' };
+
+const NO_HANDS_SECONDS = 3;   // give up on the camera after this long with nothing
 
 let video = null;
 let landmarker = null;
 let lastVideoTime = -1;
+let lastHandAt = 0;
+let pointerBound = false;
 
 function setStatus(state, message = '') {
   status.state = state;
@@ -63,8 +68,59 @@ export async function startTracking() {
     numHands: 2,
   });
 
+  lastHandAt = performance.now() / 1000;
   setStatus('ready');
+  status.input = 'hands';
   return video;
+}
+
+// --- pointer fallback ------------------------------------------------------
+//
+// One pointer drives BOTH sabers, so a block of either colour is reachable and
+// the collision code in game.js needs no special case for this mode.
+//
+// Pointer coordinates are normalised to the window, not to the camera frame.
+// The caller picks the matching transform — see layout() in game.js.
+
+export function usePointer(on) {
+  status.input = on ? 'pointer' : 'hands';
+
+  if (on && !pointerBound) {
+    pointerBound = true;
+    addEventListener('pointermove', onPointer, { passive: true });
+    addEventListener('pointerdown', onPointer, { passive: true });
+  }
+  if (!on) {
+    hands.left = emptyHand();
+    hands.right = emptyHand();
+    lastHandAt = performance.now() / 1000;
+  }
+}
+
+function onPointer(event) {
+  if (status.input !== 'pointer') return;
+
+  const x = event.clientX / window.innerWidth;
+  const y = event.clientY / window.innerHeight;
+  const now = performance.now() / 1000;
+
+  for (const key of ['left', 'right']) {
+    const hand = hands[key];
+    hand.active = true;
+    hand.tip.x = x;
+    hand.tip.y = y;
+    pushHistory(hand, now);
+
+    // Trail the hilt behind the swing so the blade reads as a blade. Falls
+    // back to pointing straight up when the pointer is sitting still.
+    if (hand.speed > 0.01) {
+      hand.wrist.x = x - hand.vel.x / hand.speed * 0.12;
+      hand.wrist.y = y - hand.vel.y / hand.speed * 0.12;
+    } else {
+      hand.wrist.x = x;
+      hand.wrist.y = y + 0.12;
+    }
+  }
 }
 
 export function stopTracking() {
@@ -80,12 +136,19 @@ export function stopTracking() {
 // at 60, so most calls find no new camera frame and simply keep the last
 // result — cheaper than interpolating, and a stale frame is 16ms old at worst.
 export function update() {
+  if (status.input === 'pointer') return;        // pointer events drive hands directly
   if (!landmarker || !video || video.readyState < 2) return;
   if (video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
 
-  const result = landmarker.detectForVideo(video, performance.now());
-  ingest(result, performance.now() / 1000);
+  const now = performance.now() / 1000;
+  ingest(landmarker.detectForVideo(video, performance.now()), now);
+
+  // Bad light, no hands in shot, or a camera pointed at the ceiling all look
+  // the same from here. Rather than leave the player staring at nothing, hand
+  // them a pointer; the UI offers the way back.
+  if (hands.left.active || hands.right.active) lastHandAt = now;
+  else if (now - lastHandAt > NO_HANDS_SECONDS) usePointer(true);
 }
 
 function ingest(result, now) {

@@ -53,6 +53,20 @@
   }
   .filebtn:hover { border-color: var(--leaf); color: var(--leaf); }
   .note { font-size: .8rem; color: rgba(232,240,232,.4); }
+
+  .ghost { border-color: rgba(232,240,232,.3); color: rgba(232,240,232,.75); }
+  .ghost:hover:not(:disabled) { background: transparent; border-color: var(--leaf); color: var(--leaf); }
+  .corner {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 2;
+    padding: .45rem 1.1rem; font-size: .85rem;
+  }
+  .corner[hidden] { display: none; }
+
+  #result { display: grid; gap: .3rem; }
+  #result[hidden] { display: none; }
+  #result .big { font-size: 2.6rem; font-weight: 700; color: var(--leaf); }
+  #result .row { color: rgba(232,240,232,.6); font-size: .9rem; }
+  #result .best { color: var(--berry); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -61,7 +75,10 @@
   <div id="overlay">
     <h1>Saber-Tea</h1>
     <p>Chém lá trà bằng tay thật. Cần webcam và đủ sáng.</p>
+    <div id="result" hidden></div>
+
     <button id="start">Bật camera</button>
+    <button id="pointer" class="ghost">Chơi bằng chuột</button>
 
     <div id="song" hidden>
       <button id="demo">Chơi nhạc demo</button>
@@ -74,6 +91,8 @@
 
     <p id="status"></p>
   </div>
+
+  <button id="mode" class="ghost corner" hidden>Dùng chuột</button>
 
   <script type="module" src="game.js"></script>
 </body>

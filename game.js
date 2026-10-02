@@ -1,7 +1,9 @@
-// Saber-Tea — game loop and rendering.
-// Phase 3: blocks fly out in time with the music. No collision yet.
+// Saber-Tea — game loop, collision and rendering.
+//
+// Reads hand (or pointer) positions from tracker.js and a chart from
+// beatmap.js, and owns everything that touches the canvas or the clock.
 
-import { hands, status, startTracking, update as updateTracking } from './tracker.js';
+import { hands, status, startTracking, usePointer, update as updateTracking } from './tracker.js';
 import { detectOnsets, onsetsToBlocks, toMono, judgeHit, multiplier, DIRECTIONS, JUDGE } from './beatmap.js';
 
 const COLOR  = { left: '#ff4d6d', right: '#a8cf8e' };
@@ -18,6 +20,11 @@ const statusEl = document.getElementById('status');
 const songBox  = document.getElementById('song');
 const fileInput = document.getElementById('file');
 const demoBtn  = document.getElementById('demo');
+const pointerBtn = document.getElementById('pointer');
+const modeBtn  = document.getElementById('mode');
+const resultEl = document.getElementById('result');
+
+const BEST_KEY = 'saber-tea-best';
 
 // The canvas is laid out in CSS pixels but backed by device pixels, otherwise
 // everything is blurry on retina. setTransform means every draw call below
@@ -46,10 +53,12 @@ let blocks = [];
 let cursor = 0;        // first block not yet past the hit plane
 let startedAt = 0;     // audioCtx.currentTime when the song began
 let playing = false;
+let current = null;    // the AudioBufferSourceNode that owns the current run
 
 const score = { points: 0, combo: 0, best: 0, hits: 0, misses: 0 };
 const particles = [];
 let lastMs = 0;
+let lastInput = null;
 
 // --- setup -----------------------------------------------------------------
 
@@ -58,20 +67,46 @@ startBtn.addEventListener('click', async () => {
   statusEl.textContent = 'Đang mở camera…';
   try {
     video = await startTracking();
-    startBtn.hidden = true;
-    songBox.hidden = false;
-    statusEl.textContent = '';
+    showSongs('');
   } catch (err) {
-    // Denied permission, no camera, or an insecure origin all land here.
-    // Phase 5 turns this into the mouse fallback; for now say why and retry.
-    statusEl.textContent = `Không mở được camera: ${err.name || err}`;
-    startBtn.disabled = false;
+    // Denied permission, no camera, insecure origin — all land here, and all
+    // mean the same thing to the player: the camera is not happening. Hand
+    // them the pointer instead of a dead end.
+    usePointer(true);
+    showSongs(`Không mở được camera (${err.name || err}). Chơi bằng chuột.`);
   }
 });
+
+pointerBtn.addEventListener('click', () => {
+  usePointer(true);
+  showSongs('');
+});
+
+function showSongs(message) {
+  startBtn.hidden = true;
+  pointerBtn.hidden = true;
+  songBox.hidden = false;
+  statusEl.textContent = message;
+}
+
+// The auto-switch can fire mid-song when the light goes bad, so the way back
+// has to be reachable without finishing the track.
+modeBtn.addEventListener('click', () => {
+  usePointer(status.input === 'hands');
+  syncModeButton();
+});
+
+function syncModeButton() {
+  // With no camera there is nothing to switch back to, so hide the control.
+  modeBtn.hidden = !video;
+  modeBtn.textContent = status.input === 'pointer' ? 'Dùng tay' : 'Dùng chuột';
+}
 
 fileInput.addEventListener('change', async () => {
   const file = fileInput.files?.[0];
   if (!file) return;
+  // Clear it, or picking the same song twice in a row fires no change event.
+  fileInput.value = '';
   await begin(() => file.arrayBuffer().then(b => audioCtx.decodeAudioData(b)));
 });
 
@@ -107,18 +142,54 @@ async function begin(getBuffer) {
     return;
   }
 
+  // Stop whatever was playing before taking ownership. Without the identity
+  // guard below, a previous source's onended would fire later and drop the
+  // player out of the run they are in the middle of.
+  current?.stop();
+
   const source = audioCtx.createBufferSource();
   source.buffer = buffer;
   source.connect(audioCtx.destination);
+
+  // Both onended callbacks are queued, never synchronous, so by the time any of
+  // them runs `current` already names the run that owns the screen.
+  source.onended = () => { if (current === source) finish(); };
 
   // The first block must still get its full flight time, so the music starts
   // TRAVEL seconds late and the clock is anchored to that same moment.
   startedAt = audioCtx.currentTime + TRAVEL;
   source.start(startedAt);
-  source.onended = () => { playing = false; overlay.hidden = false; songBox.hidden = false; };
+
+  // Assigned last so `current` only ever names a source that was started —
+  // stop() on a source that never started throws.
+  current = source;
 
   playing = true;
   overlay.hidden = true;
+  resultEl.hidden = true;
+  syncModeButton();
+}
+
+function finish() {
+  playing = false;
+
+  const total = score.hits + score.misses;
+  const accuracy = total ? Math.round(score.hits / total * 100) : 0;
+  const previous = Number(localStorage.getItem(BEST_KEY)) || 0;
+  const isBest = score.points > previous;
+  if (isBest) localStorage.setItem(BEST_KEY, String(score.points));
+
+  resultEl.innerHTML = `
+    <div class="big">${score.points.toLocaleString('vi-VN')}</div>
+    <div class="row">${accuracy}% chính xác · ${score.hits}/${total} khối · combo ${score.best}</div>
+    <div class="row ${isBest ? 'best' : ''}">${
+      isBest ? 'Điểm cao mới!' : `Điểm cao: ${Math.max(previous, score.points).toLocaleString('vi-VN')}`
+    }</div>`;
+
+  resultEl.hidden = false;
+  overlay.hidden = false;
+  songBox.hidden = false;
+  statusEl.textContent = '';
 }
 
 // Deterministic 120 BPM beat, built in a few lines rather than shipping an mp3:
@@ -172,6 +243,14 @@ function videoLayout() {
 
 function toScreen(p, L) {
   return { x: L.dx + p.x * L.dw, y: L.dy + p.y * L.dh };
+}
+
+// Hand landmarks are normalised to the CAMERA frame; pointer coordinates are
+// normalised to the WINDOW. Two genuinely different transforms, so the input
+// mode picks which one aiming goes through. The video keeps its own.
+function layout() {
+  if (status.input === 'hands' && video) return videoLayout();
+  return { dx: 0, dy: 0, dw: W, dh: H };
 }
 
 // The grid the blocks arrive on, in screen pixels.
@@ -313,20 +392,22 @@ function drawSaber(hand, color, L) {
 function frame(ms) {
   ctx.clearRect(0, 0, W, H);
 
-  if (!video || status.state !== 'ready') {
-    drawIdle(ms);
-    requestAnimationFrame(frame);
-    return;
-  }
-
-  updateTracking();
-  const L = videoLayout();
-  drawVideo(L);
-
   // Particles are cosmetic, so a frame delta is the right clock for them —
   // unlike blocks, nothing about them has to stay in step with the music.
   const dt = Math.min(0.05, (ms - lastMs) / 1000) || 0;
   lastMs = ms;
+
+  updateTracking();
+
+  // The mode can flip on its own when the camera stops seeing hands, so the
+  // button is resynced on change rather than rewritten every frame.
+  if (status.input !== lastInput) {
+    lastInput = status.input;
+    syncModeButton();
+  }
+
+  if (video) drawVideo(videoLayout());
+  const L = layout();
 
   if (playing) {
     // Every block position below is a pure function of this one number.
@@ -348,19 +429,28 @@ function frame(ms) {
     }
   }
 
-  updateParticles(dt);
-  drawSaber(hands.left,  COLOR.left,  L);
-  drawSaber(hands.right, COLOR.right, L);
-  if (playing) drawHud();
+  else drawIdle(ms);
 
-  if (!hands.left.active && !hands.right.active) {
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(232,240,232,.5)';
-    ctx.font = '15px system-ui, sans-serif';
-    ctx.fillText('Giơ tay vào khung hình', W / 2, H - 40);
-    ctx.restore();
+  updateParticles(dt);
+
+  if (status.input === 'pointer') {
+    // One pointer, one blade. It cuts either colour, so the core is neutral
+    // rather than claiming to be a hand.
+    drawSaber(hands.right, '#e8f0e8', L);
+  } else {
+    drawSaber(hands.left,  COLOR.left,  L);
+    drawSaber(hands.right, COLOR.right, L);
+    if (!hands.left.active && !hands.right.active) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(232,240,232,.5)';
+      ctx.font = '15px system-ui, sans-serif';
+      ctx.fillText('Giơ tay vào khung hình', W / 2, H - 40);
+      ctx.restore();
+    }
   }
+
+  if (playing) drawHud();
 
   requestAnimationFrame(frame);
 }
