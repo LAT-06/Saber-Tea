@@ -46,8 +46,16 @@ nhịp điệu chết.
 **2. Video phải lật gương: `x_screen = 1 - x_landmark`.**
 Không lật thì người chơi vơ tay sang phải, hình chạy sang trái.
 
-**3. Nhãn `"Left"`/`"Right"` của MediaPipe là theo góc nhìn camera → phải đảo.**
-Tay phải của người chơi bị MediaPipe gắn nhãn `"Left"`. Đi kèm bẫy số 2.
+**3. KHÔNG đảo nhãn `"Left"`/`"Right"` của MediaPipe — nhưng chỉ khi feed ảnh thô.**
+Nhãn được suy ra từ **hình dạng** bàn tay trong khung hình, không phải từ vị trí.
+Nên feed webcam thô cho ra đúng tay thật của người chơi.
+
+Đã kiểm chứng bằng ảnh test của MediaPipe: lật gương ảnh thì nhãn đổi chỗ
+(`Right@x=0.726` thành `Left@x=0.274`). Chính vì vậy ảnh **chưa** lật mới đúng.
+
+Bẫy nằm ở chỗ: nếu sau này ai đó lật chính khung hình trước khi đưa vào
+detector thì **phải** đảo nhãn lại. Hiện tại ta chỉ lật **toạ độ đầu ra**
+(bẫy số 2), không bao giờ lật pixel đầu vào. Giữ nguyên như vậy.
 
 ## Hằng số hay phải chỉnh
 
@@ -66,7 +74,7 @@ Mấy con số này sinh ra để chỉnh bằng tai và bằng tay:
 ## Tiến độ
 
 - [x] **Phase 0** — canvas + deploy GitHub Pages
-- [ ] **Phase 1** — `tracker.js`, MediaPipe Hands
+- [x] **Phase 1** — `tracker.js`, MediaPipe Hands
 - [ ] **Phase 2** — `beatmap.js`, onset detection + self-check
 - [ ] **Phase 3** — khối bay đúng nhạc
 - [ ] **Phase 4** — va chạm + hướng + điểm

@@ -56,15 +56,29 @@ delta của `requestAnimationFrame`.
 bao giờ bắt lại được. Lấy mốc từ chính thẻ audio thì tụt frame chỉ làm giật
 hình, không làm lệch nhịp.
 
-### 3.3 Webcam bị gương, và nhãn tay bị đảo
+### 3.3 Lật gương toạ độ, nhưng không lật nhãn tay
 
-Hai bẫy đi cùng nhau:
+> **Đính chính so với bản nháp đầu.** Bản nháp ghi "phải đảo nhãn tay". Sai.
+> Đã kiểm chứng bằng ảnh test của MediaPipe và kết quả ngược lại.
 
-- Video hiển thị phải lật gương để người chơi thấy tự nhiên → `x_screen = 1 - x_landmark`
-- Nhãn `"Left"` / `"Right"` của MediaPipe là **theo góc nhìn camera**, nên tay
-  phải của người chơi bị gắn nhãn `"Left"` → **phải đảo lại**
+Hai thứ nghe giống nhau nhưng tách rời:
 
-Ghi thẳng vào code kèm comment, không để người sau dò lại.
+**Toạ độ: phải lật.** `x_screen = 1 - x_landmark`. Người chơi vơ tay sang phải
+thì kiếm trên màn hình phải chạy sang phải, như soi gương.
+
+**Nhãn `"Left"`/`"Right"`: KHÔNG đảo.** Nhãn suy ra từ **hình dạng** bàn tay
+trong khung hình, không phải vị trí. Feed webcam thô cho ra đúng tay thật.
+
+Bằng chứng — chạy detector trên ảnh test `woman_hands.jpg`:
+
+| Ảnh | Kết quả |
+|---|---|
+| Gốc (chưa lật) | `Left@x=0.068`, `Right@x=0.726` — khớp ground truth |
+| Lật gương | `Left@x=0.274`, `Right@x=0.93` — nhãn đổi chỗ |
+
+Bẫy thật nằm ở điều kiện: **nếu lật chính khung hình trước khi đưa vào detector
+thì phải đảo nhãn lại.** Ta chỉ lật toạ độ đầu ra, không bao giờ lật pixel đầu
+vào — nên không đảo. Ghi comment thẳng vào `tracker.js`.
 
 ## 4. Kiến trúc production
 
